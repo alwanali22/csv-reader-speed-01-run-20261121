@@ -135,19 +135,10 @@ export function run(input) {
     const openLine = ln;
     const start = open + 1;
 
-    let search = start;
-    let q = src.indexOf('"', search);
-    let paired = false;
+    if (lineEnd !== -1 && lineEnd < start) lineEnd = src.indexOf('\n', start);
+    if (nextCr !== -1 && nextCr < start) nextCr = src.indexOf('\r', start);
 
-    while (q !== -1) {
-      if (src.charCodeAt(q + 1) === 34) {
-        paired = true;
-        search = q + 2;
-        q = src.indexOf('"', search);
-      } else {
-        break;
-      }
-    }
+    let q = src.indexOf('"', start);
 
     if (q === -1) {
       pos = open + 1;
@@ -159,125 +150,147 @@ export function run(input) {
       return;
     }
 
-    if (lineEnd !== -1 && lineEnd < start) lineEnd = src.indexOf('\n', start);
-    if (nextCr !== -1 && nextCr < start) nextCr = src.indexOf('\r', start);
+    if (src.charCodeAt(q + 1) !== 34 && (lineEnd === -1 || lineEnd >= q) && (nextCr === -1 || nextCr >= q)) {
+      fv = src.slice(start, q);
+      pos = q + 1;
 
-    const hasLf = lineEnd !== -1 && lineEnd < q;
-    const hasCr = nextCr !== -1 && nextCr < q;
-
-    let value;
-
-    if (!paired && !hasLf && !hasCr) {
-      value = src.slice(start, q);
-    } else if (!paired && hasLf && !hasCr) {
-      value = src.slice(start, q);
-      let p = src.indexOf('\n', start);
-      while (p !== -1 && p < q) {
-        ln += 1;
-        p = src.indexOf('\n', p + 1);
+      if (pos >= n) {
+        fe = 2;
+        return;
       }
-    } else if (paired && !hasLf && !hasCr) {
-      value = src.slice(start, q).split('""').join('"');
-    } else {
-      let out = '';
-      let from = start;
-      let crNext = hasCr ? nextCr : -1;
-      let lfNext = hasLf ? lineEnd : -1;
-      let dqNext = paired ? src.indexOf('"', start) : -1;
 
-      if (dqNext >= q) dqNext = -1;
+      const c = src.charCodeAt(pos);
 
-      while (from < q) {
-        let at = q;
-        let kind = 0;
+      if (c === 44) {
+        pos += 1;
+        fe = 0;
+        return;
+      }
 
-        if (crNext !== -1 && crNext < at) {
-          at = crNext;
-          kind = 1;
-        }
-        if (lfNext !== -1 && lfNext < at) {
-          at = lfNext;
-          kind = 2;
-        }
-        if (dqNext !== -1 && dqNext < at) {
-          at = dqNext;
-          kind = 3;
-        }
+      if (c === 10) {
+        pos += 1;
+        ln += 1;
+        fe = 1;
+        return;
+      }
 
-        if (kind === 0) {
-          out += src.slice(from, q);
-          break;
-        }
+      if (c === 13 && src.charCodeAt(pos + 1) === 10) {
+        pos += 2;
+        ln += 1;
+        fe = 1;
+        return;
+      }
 
-        if (at > from) out += src.slice(from, at);
+      fa = 0;
+      scanBare();
 
-        if (kind === 1) {
-          out += '\n';
-          ln += 1;
+      if (fa > 0) note('quote_junk');
+      return;
+    }
 
-          if (src.charCodeAt(at + 1) === 10) {
-            from = at + 2;
-            if (hasLf) {
-              lfNext = src.indexOf('\n', from);
-              if (lfNext >= q) lfNext = -1;
-            }
-          } else {
-            from = at + 1;
-          }
+    let from = start;
+    let out = '';
+    let dqNext = q;
+    let crNext = nextCr;
+    let lfNext = lineEnd;
 
-          crNext = src.indexOf('\r', from);
-          if (crNext >= q) crNext = -1;
-        } else if (kind === 2) {
-          out += '\n';
-          ln += 1;
-          from = at + 1;
-          lfNext = src.indexOf('\n', from);
-          if (lfNext >= q) lfNext = -1;
-        } else {
+    while (true) {
+      if (dqNext !== -1 && dqNext < from) dqNext = src.indexOf('"', from);
+      if (crNext !== -1 && crNext < from) crNext = src.indexOf('\r', from);
+      if (lfNext !== -1 && lfNext < from) lfNext = src.indexOf('\n', from);
+
+      if (dqNext === -1) {
+        pos = open + 1;
+        ln = openLine;
+        note('unterminated_quote');
+        fv = '"';
+        fa = 0;
+        scanBare();
+        return;
+      }
+
+      let at = dqNext;
+      let kind = 3;
+
+      if (crNext !== -1 && crNext < at) {
+        at = crNext;
+        kind = 1;
+      }
+
+      if (lfNext !== -1 && lfNext < at) {
+        at = lfNext;
+        kind = 2;
+      }
+
+      if (kind === 3) {
+        if (src.charCodeAt(at + 1) === 34) {
+          if (at > from) out += src.slice(from, at);
           out += '"';
           from = at + 2;
           dqNext = src.indexOf('"', from);
-          if (dqNext >= q) dqNext = -1;
+          continue;
         }
+
+        if (at > from) out += src.slice(from, at);
+        fv = out;
+        pos = at + 1;
+
+        if (pos >= n) {
+          fe = 2;
+          return;
+        }
+
+        const c = src.charCodeAt(pos);
+
+        if (c === 44) {
+          pos += 1;
+          fe = 0;
+          return;
+        }
+
+        if (c === 10) {
+          pos += 1;
+          ln += 1;
+          fe = 1;
+          return;
+        }
+
+        if (c === 13 && src.charCodeAt(pos + 1) === 10) {
+          pos += 2;
+          ln += 1;
+          fe = 1;
+          return;
+        }
+
+        fa = 0;
+        scanBare();
+
+        if (fa > 0) note('quote_junk');
+        return;
       }
 
-      value = out;
-    }
+      if (kind === 1) {
+        if (at > from) out += src.slice(from, at);
+        out += '\n';
+        ln += 1;
 
-    fv = value;
-    pos = q + 1;
+        if (src.charCodeAt(at + 1) === 10) {
+          from = at + 2;
+          lfNext = src.indexOf('\n', from);
+        } else {
+          from = at + 1;
+        }
 
-    if (pos >= n) {
-      fe = 2;
-      return;
-    }
+        crNext = src.indexOf('\r', from);
+        continue;
+      }
 
-    const c = src.charCodeAt(pos);
-
-    if (c === 44) {
-      pos += 1;
-      fe = 0;
-      return;
-    }
-
-    if (c === 10) {
-      pos += 1;
+      if (at > from) out += src.slice(from, at);
+      out += '\n';
       ln += 1;
-      fe = 1;
-      return;
+      from = at + 1;
+      lfNext = src.indexOf('\n', from);
     }
-
-    if (c === 13 && src.charCodeAt(pos + 1) === 10) {
-      pos += 2;
-      ln += 1;
-      fe = 1;
-      return;
-    }
-
-    fa = 0;
-    scanBare();
-
-    if (fa > 0) note('quote_junk');
   }
 
   function finishRow(fields, lastQuoted) {
